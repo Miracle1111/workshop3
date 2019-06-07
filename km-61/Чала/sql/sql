@@ -1,0 +1,139 @@
+create table subject
+(
+  subject_id varchar2(32) not null,
+  subject_name varchar2(30) not null
+);
+
+alter table students
+  add constraint subject_pk primary key (subject_id);
+
+CREATE TRIGGER subject_id_generation
+  BEFORE INSERT
+  ON subject
+  FOR EACH ROW
+BEGIN
+  :new.subject_id := SYS_GUID();
+END;
+
+create table auditorium
+(
+  auditorium_id varchar2(32) not null,
+  auditorium_name varchar2(10) not null
+);
+
+alter table auditorium
+  add constraint auditorium_pk primary key (auditorium_id);
+alter table auditorium
+  add constraint unique_auditorium unique (auditorium_name);
+
+CREATE TRIGGER auditorium_id_generation
+  BEFORE INSERT
+  ON auditorium
+  FOR EACH ROW
+BEGIN
+  :new.auditorium_id := SYS_GUID();
+END;
+
+create table auditorium_subject
+(
+  id varchar2(32) not null,
+  subject_id varchar2(32) not null,
+  auditorium_id varchar2(32) not null
+);
+
+CREATE TRIGGER auditorium_subject_id_generation
+  BEFORE INSERT
+  ON auditorium_subject
+  FOR EACH ROW
+BEGIN
+  :new.id := SYS_GUID();
+END;
+
+alter table auditorium_subject
+  add constraint auditorium_subject_pk primary key (subject_id, auditorium_id);
+alter table auditorium_subject
+  add constraint auditorium_subject_fk foreign key (subject_id) references subject (subject_id);
+alter table auditorium_subject
+  add constraint auditorium_subject_id_fk foreign key (auditorium_id) references groups (auditorium_id);
+
+
+create or replace PACKAGE auditorium_search IS
+
+  TYPE auditorium_data IS RECORD
+    (
+    auditorium_id AUDITORIUM.AUDITORIUM_ID%TYPE,
+    AUDITORIUM_name auditorium.auditorium_name%TYPE 
+    );
+
+  TYPE auditorium_data_table IS TABLE OF auditorium_data;
+
+  FUNCTION find(auditorium_name AUDITORIUM.AUDITORIUM_NAME%TYPE default null,
+                SUBJECT_NAME SUBJECT.TITLE%TYPE default null)
+    RETURN auditorium_data_table
+    PIPELINED;
+
+END student_search;
+
+
+create or replace PACKAGE BODY auditorium_search IS
+
+  FUNCTION find(auditorium_name AUDITORIUM.AUDITORIUM_NAME%TYPE default null,
+                subject_name SUBJECT.TITLE%TYPE default null)
+    RETURN auditorium_data_table
+    PIPELINED
+  IS
+    TYPE auditorium_cursor_type IS REF CURSOR;
+    auditorium_cursor auditorium_cursor_type;
+
+    TYPE string_list is varray(3) of varchar2(100);
+    filters string_list := string_list();
+    filters_quantity integer := 0;
+
+    auditorium auditorium_data;
+    query varchar2(2000);
+    filter_query varchar2(300);
+
+  BEGIN
+    filter_query := ' where ';
+
+    query := 'SELECT auditorium.auditorium_id, ' ||
+            '       auditorium.auditorium_name';
+
+    if auditorium_name is not null then
+        filters_quantity := filters_quantity + 1;
+        filters.extend;
+        filters(filters_quantity) := ' auditorium.auditorium_name = ''' || auditorium_name || ''' ';
+    end if;
+
+    if subject_name is not null then
+        filters_quantity := filters_quantity + 1;
+        filters.extend;
+        filters(filters_quantity) := ' subject.subject_name = ''' || subject_name || ''' ';
+        query := query || ' join auditorium_subject on auditorium.auditorium_id = auditorium_subject.auditorium_id' ||
+                               '         join groups on groups.group_identifier = auditorium_subject.subject_id ';
+    end if;
+
+    if filters_quantity != 0 then
+         for i in 1..filters_quantity loop
+            if i != filters_quantity then
+                filter_query := filter_query ||  filters(i)  || ' and ';
+            else 
+                 filter_query := filter_query ||  filters(i);
+            end if;
+        end loop;
+       query := query || filter_query;
+    end if;
+
+
+    OPEN auditorium_cursor FOR query;
+    LOOP
+      FETCH auditorium_cursor into auditorium;
+      exit when (auditorium_cursor %NOTFOUND);
+
+      PIPE ROW (auditorium);
+    end loop;
+    CLOSE auditorium_cursor;
+
+  END find;
+
+END auditorium_search;
